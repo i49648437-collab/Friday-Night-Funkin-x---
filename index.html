@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Friday Night Funkin' - ФНФ x Аля</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 1280px;
+            height: 720px;
+            background: #000;
+        }
+
+        #gameCanvas {
+            display: block;
+            background: #000;
+        }
+
+        #loadingScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        #loadingScreen h1 {
+            color: #fff;
+            font-size: 48px;
+            margin-bottom: 30px;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.8; }
+        }
+
+        .loadingBar {
+            width: 400px;
+            height: 30px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            overflow: hidden;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .loadingProgress {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b, #feca57, #48dbfb, #ff9ff3);
+            background-size: 300% 100%;
+            animation: gradientShift 2s ease infinite;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        #loadingText {
+            color: #aaa;
+            margin-top: 20px;
+            font-size: 16px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="1280" height="720"></canvas>
+        <div id="loadingScreen">
+            <h1>🎵 Friday Night Funkin' 🎵</h1>
+            <div class="loadingBar">
+                <div class="loadingProgress" id="loadingProgress"></div>
+            </div>
+            <div id="loadingText">Загрузка активов...</div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // FRIDAY NIGHT FUNKIN' - ФНФ x Аля
+        // Полная версия игры с оригинальной механикой
+        // ============================================
+
+        'use strict';
+
+        // ============================================
+        // КОНСТАНТЫ И НАСТРОЙКИ
+        // ============================================
+        const CONSTANTS = {
+            CANVAS_WIDTH: 1280,
+            CANVAS_HEIGHT: 720,
+            FPS: 60,
+            NOTE_SPEED: 5.5,
+            NOTE_SPAWN_Y: -100,
+            NOTE_HIT_Y: 650,
+            HIT_WINDOW: {
+                PERFECT: 50,
+                GOOD: 100,
+                BAD: 150,
+                MISS: 200
+            },
+            KEYS: {
+                LEFT: ['ArrowLeft', 'a', 'A', 'ф', 'Ф'],
+                DOWN: ['ArrowDown', 's', 'S', 'ы', 'Ы'],
+                UP: ['ArrowUp', 'w', 'W', 'ц', 'Ц'],
+                RIGHT: ['ArrowRight', 'd', 'D', 'в', 'В']
+            },
+            DIRECTIONS: ['left', 'down', 'up', 'right'],
+            DIRECTION_INDEX: { left: 0, down: 1, up: 2, right: 3 },
+            SCORES: {
+                PERFECT: 350,
+                GOOD: 200,
+                BAD: 100,
+                MISS: -100
+            },
+            HEALTH: {
+                HIT: 0.03,
+                MISS: 0.08
+            },
+            COMBO: {
+                MULTIPLIER_INTERVAL: 10,
+                MAX_MULTIPLIER: 4
+            }
+        };
+
+        // ============================================
+        // СИСТЕМА СОСТОЯНИЙ ИГРЫ
+        // ============================================
+        const GameState = {
+            LOADING: 'loading',
+            MENU: 'menu',
+            PLAYING: 'playing',
+            PAUSED: 'paused',
+            GAME_OVER: 'gameOver',
+            VICTORY: 'victory'
+        };
+
+        // ============================================
+        // КЛАСС МЕНЕДЖЕРА АКТИВОВ
+        // ============================================
+        class AssetManager {
+            constructor() {
+                this.images = {};
+                this.sounds = {};
+                this.loadedCount = 0;
+                this.totalAssets = 0;
+                this.onProgress = null;
+            }
+
+            async loadAll() {
+                const imagePaths = {
+                    // БФ спрайты
+                    'bf_idle': 'бф/бф.png',
+                    'bf_up': 'бф/бф вверх.png',
+                    'bf_down': 'бф/бф вниз.png',
+                    'bf_left': 'бф/бф влево.png',
+                    'bf_right': 'бф/бф вправо.png',
+                    'bf_up_miss': 'бф/бф вверх мимо.png',
+                    'bf_down_miss': 'бф/бф вниз мимо.png',
+                    'bf_left_miss': 'бф/бф влево мимо.png',
+                    'bf_right_miss': 'бф/бф вправо мимо.png',
+                    'bf_lose_icon': 'бф/бф иконка головы проигрывает.png',
+                    'bf_win_icon': 'бф/бф инока головы стандарт и выигрывает.png',
+                    'bf_two_fingers': 'бф/бф показывает 2 пальца.png',
+                    
+                    // ГФ спрайты
+                    'gf_idle': 'гф/гф.png',
+                    'gf_up': 'гф/гф вверх.png',
+                    'gf_down': 'гф/гф вниз.png',
+                    'gf_left': 'гф/гф влево.png',
+                    'gf_right': 'гф/гф вправо.png',
+                    'gf_lose_icon': 'гф/гф иконка головы проигрывает.png',
+                    'gf_standard_icon': 'гф/гф иконка головы стандарт.png',
+                    'gf_win_icon': 'гф/иконка головы гф выигрывает.png',
+                    
+                    // Фон и сцена
+                    'background_menu': 'изображения/фон меню.png',
+                    'intro_image': 'изображения/заставка.jpg',
+                    'stage': 'изображения/сцена.webp',
+                    
+                    // Стрелки
+                    'arrow_left': 'стрелки/влево.png',
+                    'arrow_right': 'стрелки/вправо.png',
+                    'arrow_up': 'стрелки/верх.png',
+                    'arrow_down': 'стрелки/вниз.png',
+                    'arrows_all': 'стрелки/стрелки все в ряд.png'
+                };
+
+                const soundPaths = {
+                    'menu_music': 'звуки/фоновая музыка меню.mp3',
+                    'cancel': 'звуки/cancelmenu.mp3',
+                    'click': 'звуки/clicktext.mp3',
+                    'confirm': 'звуки/confirmmenu.mp3',
+                    'loss': 'звуки/fnf_loss_sfx.mp3',
+                    'game_over': 'звуки/GameOver.ogg',
+                    'game_over_end': 'звуки/gameoverend.mp3',
+                    'tutorial_inst': 'треки/Tutorial_Inst.ogg'
+                };
+
+                this.totalAssets = Object.keys(imagePaths).length + Object.keys(soundPaths).length;
+
+                // Загрузка изображений
+                for (const [key, path] of Object.entries(imagePaths)) {
+                    await this.loadImage(key, path);
+                }
+
+                // Загрузка звуков
+                for (const [key, path] of Object.entries(soundPaths)) {
+                    await this.loadSound(key, path);
+                }
+            }
+
+            loadImage(key, path) {
+                return new Promise((resolve) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        this.images[key] = img;
+                        this.loadedCount++;
+                        if (this.onProgress) this.onProgress(this.loadedCount, this.totalAssets);
+                        resolve(img);
+                    };
+                    img.onerror = () => {
+                        console.warn(`Failed to load image: ${path}`);
+                        this.loadedCount++;
+                        if (this.onProgress) this.onProgress(this.loadedCount, this.totalAssets);
+                        resolve(null);
+                    };
+                    img.src = path;
+                });
+            }
+
+            loadSound(key, path) {
+                return new Promise((resolve) => {
+                    const audio = new Audio(path);
+                    audio.addEventListener('canplaythrough', () => {
+                        this.sounds[key] = audio;
+                        this.loadedCount++;
+                        if (this.onProgress) this.onProgress(this.loadedCount, this.totalAssets);
+                        resolve(audio);
+                    });
+                    audio.addEventListener('error', () => {
+                        console.warn(`Failed to load sound: ${path}`);
+                        this.loadedCount++;
+                        if (this.onProgress) this.onProgress(this.loadedCount, this.totalAssets);
+                        resolve(null);
+                    });
+                    audio.load();
+                });
+            }
+
+            getImage(key) {
+                return this.images[key];
+            }
+
+            getSound(key) {
+                return this.sounds[key];
+            }
+
+            playSound(key, volume = 1.0) {
+                const sound = this.sounds[key];
+                if (sound) {
+                    sound.volume = volume;
+                    sound.currentTime = 0;
+                    sound.play().catch(e => console.log('Audio play failed:', e));
+                }
+            }
+
+            getLoadingProgress() {
+                return (this.loadedCount / this.totalAssets) * 100;
+            }
+        }
+
+        // ============================================
+        // КЛАСС НОТЫ (СТРЕЛКИ)
+        // ============================================
+        class Note {
+            constructor(direction, time, isPlayerNote = false) {
+                this.direction = direction;
+                this.time = time;
+                this.y = CONSTANTS.NOTE_SPAWN_Y;
+                this.hit = false;
+                this.missed = false;
+                this.isPlayerNote = isPlayerNote;
+                this.scale = 1;
+                this.alpha = 1;
+                this.wasHit = false;
+            }
+
+            update(deltaTime, noteSpeed) {
+                if (!this.hit && !this.missed) {
+                    this.y += noteSpeed * deltaTime * 60;
+                }
+                
+                if (this.wasHit) {
+                    this.scale -= 0.15;
+                    this.alpha -= 0.1;
+                }
+            }
+
+            shouldMiss(currentTime, hitWindow) {
+                return !this.hit && currentTime > this.time + hitWindow.MISS;
+            }
+
+            canBeHit(currentTime, hitWindow) {
+                const diff = Math.abs(currentTime - this.time);
+                return diff < hitWindow.BAD;
+            }
+
+            getHitResult(currentTime, hitWindow) {
+                const diff = Math.abs(currentTime - this.time);
+                if (diff < hitWindow.PERFECT) return 'perfect';
+                if (diff < hitWindow.GOOD) return 'good';
+                if (diff < hitWindow.BAD) return 'bad';
+                return null;
+            }
+
+            draw(ctx, x, assets) {
+                if (this.alpha <= 0) return;
+                
+                ctx.save();
+                ctx.globalAlpha = this.alpha;
+                ctx.scale(this.scale, this.scale);
+                
+                const arrowKey = `arrow_${this.direction}`;
+                const arrowImg = assets.getImage(arrowKey);
+                
+                if (arrowImg) {
+                    const size = 90;
+                    ctx.drawImage(arrowImg, x - size/2, this.y - size/2, size, size);
+                } else {
+                    // Рисуем стрелку если изображение не загрузилось
+                    this.drawFallbackArrow(ctx, x, this.y);
+                }
+                
+                ctx.restore();
+            }
+
+            drawFallbackArrow(ctx, x, y) {
+                const size = 80;
+                ctx.fillStyle = this.getDirectionColor();
+                ctx.beginPath();
+                
+                switch(this.direction) {
+                    case 'left':
+                        ctx.moveTo(x + size/2, y);
+                        ctx.lineTo(x - size/2, y - size/2);
+                        ctx.lineTo(x - size/4, y);
+                        ctx.lineTo(x - size/2, y + size/2);
+                        break;
+                    case 'right':
+                        ctx.moveTo(x - size/2, y);
+                        ctx.lineTo(x + size/2, y - size/2);
+                        ctx.lineTo(x + size/4, y);
+                        ctx.lineTo(x + size/2, y + size/2);
+                        break;
+                    case 'up':
+                        ctx.moveTo(x, y - size/2);
+                        ctx.lineTo(x - size/2, y + size/2);
+                        ctx.lineTo(x, y + size/4);
+                        ctx.lineTo(x + size/2, y + size/2);
+                        break;
+                    case 'down':
+                        ctx.moveTo(x, y + size/2);
+                        ctx.lineTo(x - size/2, y - size/2);
+                        ctx.lineTo(x, y - size/4);
+                        ctx.lineTo(x + size/2, y - size/2);
+                        break;
+                }
+                
+                ctx.fill();
+            }
+
+            getDirectionColor() {
+                switch(this.direction) {
+                    case 'left': return '#c24b99';
+                    case 'down': return '#00ffff';
+                    case 'up': return '#12fa05';
+                    case 'right': return '#f9393f';
+                    default: return '#ffffff';
+                }
+            }
+        }
+
+        // ============================================
+        // КЛАСС ИГРОКА (БФ)
+        // ============================================
+        class Player {
+            constructor() {
+                this.currentDirection = 'idle';
+                this.animationTimer = 0;
+                this.animationDuration = 150;
+                this.health = 0.5;
+                this.score = 0;
+                this.combo = 0;
+                this.maxCombo = 0;
+                this.multiplier = 1;
+                this.notesHit = 0;
+                this.notesMissed = 0;
+                this.accuracy = 100;
+                this.totalNotes = 0;
+            }
+
+            setDirection(direction) {
+                this.currentDirection = direction;
+                this.animationTimer = this.animationDuration;
+            }
+
+            update(deltaTime) {
+                if (this.animationTimer > 0) {
+                    this.animationTimer -= deltaTime * 1000;
+                    if (this.animationTimer <= 0) {
+                        this.currentDirection = 'idle';
+                    }
+                }
+            }
+
+            hitNote(result) {
+                this.notesHit++;
+                this.totalNotes++;
+                this.combo++;
+                if (this.combo > this.maxCombo) {
+                    this.maxCombo = this.combo;
+                }
+                
+                // Обновляем множитель
+                this.multiplier = Math.min(
+                    CONSTANTS.COMBO.MAX_MULTIPLIER,
+                    Math.floor(this.combo / CONSTANTS.COMBO.MULTIPLIER_INTERVAL) + 1
+                );
+                
+                // Добавляем очки с множителем
+                let baseScore = CONSTANTS.SCORES[result.toUpperCase()] || 0;
+                this.score += baseScore * this.multiplier;
+                
+                // Восстанавливаем здоровье
+                this.health = Math.min(1, this.health + CONSTANTS.HEALTH.HIT);
+                
+                // Обновляем точность
+                this.updateAccuracy();
+                
+                return { score: baseScore * this.multiplier, combo: this.combo, multiplier: this.multiplier };
+            }
+
+            missNote() {
+                this.notesMissed++;
+                this.totalNotes++;
+                this.combo = 0;
+                this.multiplier = 1;
+                this.health = Math.max(0, this.health - CONSTANTS.HEALTH.MISS);
+                this.updateAccuracy();
+            }
+
+            updateAccuracy() {
+                if (this.totalNotes > 0) {
+                    this.accuracy = (this.notesHit / this.totalNotes) * 100;
+                }
+            }
+
+            getCurrentSprite() {
+                if (this.currentDirection === 'idle') {
+                    return 'bf_idle';
+                }
+                const suffix = this.animationTimer > this.animationDuration / 2 ? '_miss' : '';
+                return `bf_${this.currentDirection}${suffix}`;
+            }
+
+            draw(ctx, x, y, assets) {
+                const spriteKey = this.getCurrentSprite();
+                const sprite = assets.getImage(spriteKey);
+                
+                if (sprite) {
+                    const height = 400;
+                    const width = height * (sprite.width / sprite.height);
+                    ctx.drawImage(sprite, x - width/2, y - height, width, height);
+                } else {
+                    // Fallback рисунок
+                    this.drawFallback(ctx, x, y);
+                }
+            }
+
+            drawFallback(ctx, x, y) {
+                ctx.fillStyle = '#66ccff';
+                ctx.beginPath();
+                ctx.arc(x, y - 200, 60, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillRect(x - 40, y - 140, 80, 150);
+            }
+        }
+
+        // ============================================
+        // КЛАСС ПРОТИВНИКА (ГФ)
+        // ============================================
+        class Opponent {
+            constructor() {
+                this.currentDirection = 'idle';
+                this.animationTimer = 0;
+                this.animationDuration = 200;
+                this.noteQueue = [];
+            }
+
+            playNote(direction, time) {
+                this.noteQueue.push({ direction, time });
+            }
+
+            update(deltaTime, currentTime) {
+                // Проверяем очередь нот для анимации
+                for (let i = this.noteQueue.length - 1; i >= 0; i--) {
+                    const note = this.noteQueue[i];
+                    if (currentTime >= note.time - 200 && currentTime <= note.time + 200) {
+                        this.currentDirection = note.direction;
+                        this.animationTimer = this.animationDuration;
+                        this.noteQueue.splice(i, 1);
+                        break;
+                    }
+                }
+
+                if (this.animationTimer > 0) {
+                    this.animationTimer -= deltaTime * 1000;
+                    if (this.animationTimer <= 0) {
+                        this.currentDirection = 'idle';
+                    }
+                }
+            }
+
+            getCurrentSprite() {
+                if (this.currentDirection === 'idle') {
+                    return 'gf_idle';
+                }
+                return `gf_${this.currentDirection}`;
+            }
+
+            draw(ctx, x, y, assets) {
+                const spriteKey = this.getCurrentSprite();
+                const sprite = assets.getImage(spriteKey);
+                
+                if (sprite) {
+                    const height = 380;
+                    const width = height * (sprite.width / sprite.height);
+                    ctx.drawImage(sprite, x - width/2, y - height, width, height);
+                } else {
+                    this.drawFallback(ctx, x, y);
+                }
+            }
+
+            drawFallback(ctx, x, y) {
+                ctx.fillStyle = '#ff99cc';
+                ctx.beginPath();
+                ctx.arc(x, y - 190, 55, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillRect(x - 35, y - 135, 70, 140);
+            }
+        }
+
+        // ============================================
+        // КЛАСС СЕКВЕНОРА (ЧАРТ)
+        // ============================================
+        class Sequencer {
+            constructor() {
+                this.chart = [];
+                this.songStartTime = 0;
+                this.isPlaying = false;
+            }
+
+            // Генерация чарта для Tutorial
+            generateTutorialChart(bpm = 100) {
+                const beatTime = 60000 / bpm; // ms per beat
+                const chart = [];
+                
+                // Вступление (тишина)
+                const startOffset = 4 * beatTime;
+                
+                // Паттерн для Tutorial - классическая мелодия
+                const patterns = [
+                    // Базовый паттерн
+                    { dir: 'left', beats: [0, 2, 4, 6] },
+                    { dir: 'down', beats: [1, 3, 5, 7] },
+                    { dir: 'up', beats: [8, 10, 12, 14] },
+                    { dir: 'right', beats: [9, 11, 13, 15] },
+                    
+                    // Ускоренный паттерн
+                    { dir: 'left', beats: [16, 16.5, 17, 17.5] },
+                    { dir: 'down', beats: [18, 18.5, 19, 19.5] },
+                    { dir: 'up', beats: [20, 20.5, 21, 21.5] },
+                    { dir: 'right', beats: [22, 22.5, 23, 23.5] },
+                    
+                    // Комбо паттерн
+                    { dir: 'left', beats: [24, 25] },
+                    { dir: 'down', beats: [24.5, 25.5] },
+                    { dir: 'up', beats: [26, 27] },
+                    { dir: 'right', beats: [26.5, 27.5] },
+                    
+                    // Финальный паттерн
+                    { dir: 'left', beats: [28, 29, 30, 31] },
+                    { dir: 'down', beats: [28.25, 29.25, 30.25, 31.25] },
+                    { dir: 'up', beats: [28.5, 29.5, 30.5, 31.5] },
+                    { dir: 'right', beats: [28.75, 29.75, 30.75, 31.75] }
+                ];
+
+                patterns.forEach(pattern => {
+                    pattern.beats.forEach(beat => {
+                        chart.push({
+                            direction: pattern.dir,
+                            time: startOffset + (beat * beatTime)
+                        });
+                    });
+                });
+
+                // Сортировка по времени
+                chart.sort((a, b) => a.time - b.time);
+                
+                this.chart = chart;
+                return chart;
+            }
+
+            getNotesForTimeRange(startTime, endTime) {
+                return this.chart.filter(note => 
+                    note.time >= startTime && note.time <= endTime
+                );
+            }
+
+            getNextNoteTime(currentTime) {
+                const futureNotes = this.chart.filter(note => note.time > currentTime);
+                if (futureNotes.length === 0) return null;
+                return futureNotes[0].time;
+            }
+
+            getSongLength() {
+                if (this.chart.length === 0) return 0;
+                return this.chart[this.chart.length - 1].time + 2000;
+            }
+        }
+
+        // ============================================
+        // КЛАСС UI МЕНЕДЖЕРА
+        // ============================================
+        class UIManager {
+            constructor(game) {
+                this.game = game;
+                this.menuSelection = 0;
+                this.menuItems = ['ИГРАТЬ', 'ОПЦИИ', 'АВТОРЫ', 'ВЫХОД'];
+                this.titleBounce = 0;
+                this.selectedOption = 0;
+                this.optionsMenu = {
+                    items: ['ГРОМКОСТЬ: 100%', 'СКОРОСТЬ НОТ: 5.5', 'УПРАВЛЕНИЕ', 'НАЗАД'],
+                    values: [100, 5.5, 'WASD/Стрелки', null]
+                };
+            }
+
+            update(deltaTime) {
+                this.titleBounce += deltaTime * 5;
+            }
+
+            draw(ctx, assets) {
+                if (this.game.state === GameState.MENU) {
+                    this.drawMainMenu(ctx, assets);
+                } else if (this.game.state === GameState.PLAYING) {
+                    this.drawGameUI(ctx, assets);
+                } else if (this.game.state === GameState.PAUSED) {
+                    this.drawPauseMenu(ctx, assets);
+                } else if (this.game.state === GameState.GAME_OVER) {
+                    this.drawGameOver(ctx, assets, false);
+                } else if (this.game.state === GameState.VICTORY) {
+                    this.drawGameOver(ctx, assets, true);
+                }
+            }
+
+            drawMainMenu(ctx, assets) {
+                // Фон меню
+                const bgImage = assets.getImage('background_menu');
+                if (bgImage) {
+                    ctx.drawImage(bgImage, 0, 0, CONSTANTS.CANVAS_WIDTH, CONSTANTS.CANVAS_HEIGHT);
+                } else {
+                    // Градиентный фон
+                    const gradient = ctx.createLinearGradient(0, 0, 0, CONSTANTS.CANVAS_HEIGHT);
+                    gradient.addColorStop(0, '#1a1a2e');
+                    gradient.addColorStop(0.5, '#16213e');
+                    gradient.addColorStop(1, '#0f3460');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(0, 0, CONSTANTS.CANVAS_WIDTH, CONSTANTS.CANVAS_HEIGHT);
+                }
+
+                // Название игры с анимацией
+                const titleY = 150 + Math.sin(this.titleBounce) * 10;
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 72px Arial';
+                ctx.textAlign = 'center';
+                ctx.shadowColor = '#ff6b6b';
+                ctx.shadowBlur = 20;
+                ctx.fillText('FRIDAY NIGHT FUNKIN\'', CONSTANTS.CANVAS_WIDTH / 2, titleY);
+                ctx.shadowBlur = 0;
+                
+                ctx.font = '48px Arial';
+                ctx.fillStyle = '#feca57';
+                ctx.fillText('ФНФ x АЛЯ', CONSTANTS.CANVAS_WIDTH / 2, titleY + 60);
+
+                // ГФ на фоне
+                const gfImage = assets.getImage('gf_idle');
+                if (gfImage) {
+                    const height = 500;
+                    const width = height * (gfImage.width / gfImage.height);
+                    ctx.drawImage(gfImage, CONSTANTS.CANVAS_WIDTH / 2 - width/2, 500 - height, width, height);
+                }
+
+                // Пункты меню
+                const menuStartY = 450;
+                const itemHeight = 70;
+                
+                this.menuItems.forEach((item, index) => {
+                    const isSelected = index === this.menuSelection;
+                    const y = menuStartY + index * itemHeight;
+                    
+                    ctx.font = isSelected ? 'bold 42px Arial' : '36px Arial';
+                    ctx.fillStyle = isSelected ? '#ff6b6b' : '#ffffff';
+                    ctx.shadowColor = isSelected ? '#ff6b6b' : 'transparent';
+                    ctx.shadowBlur = isSelected ? 15 : 0;
+                    
+                    const scaleX = isSelected ? 1.1 : 1;
+                    const originalWidth = ctx.measureText(item).width;
+                    ctx.save();
+                    ctx.translate(CONSTANTS.CANVAS_WIDTH / 2, y);
+                    ctx.scale(scaleX, 1);
+                    ctx.fillText(item, 0, 0);
+                    ctx.restore();
+                    ctx.shadowBlur = 0;
+                });
+
+                // Подсказка
+                ctx.font = '24px Arial';
+                ctx.fillStyle = '#888';
+                ctx.textAlign = 'center';
+                ctx.fillText('Используйте СТРЕЛКИ для навигации, ENTER для выбора', 
+                           CONSTANTS.CANVAS_WIDTH / 2, CONSTANTS.CANVAS_HEIGHT - 50);
+            }
+
+            drawGameUI(ctx, assets) {
+                const player = this.game.player;
+                
+                // Health bar
+                const healthBarWidth = 600;
+                const healthBarHeight = 30;
+                const healthBarX = (CONSTANTS.CANVAS_WIDTH - healthBarWidth) / 2;
+                const healthBarY = 30;
+                
+                // Фон полосы здоровья
+                ctx.fillStyle = '#333';
+                ctx.fillRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+                
+                // Градиент для здоровья
+                const healthGradient = ctx.createLinearGradient(healthBarX, healthBarY, 
+                                                               healthBarX + healthBarWidth, healthBarY);
+                healthGradient.addColorStop(0, '#ff0000');
+                healthGradient.addColorStop(0.5, '#ffff00');
+                healthGradient.addColorStop(1, '#00ff00');
+                
+                // Текущее здоровье
+                const currentHealthWidth = healthBarWidth * player.health;
+                ctx.fillStyle = healthGradient;
+                ctx.fillRect(healthBarX, healthBarY, currentHealthWidth, healthBarHeight);
+                
+                // Рамка
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+
+                // Иконки персонажей
+                const iconSize = 80;
+                const iconY = healthBarY - 10;
+                
+                // Иконка проигрыша/победы BF
+                const bfIconKey = player.health < 0.3 ? 'bf_lose_icon' : 'bf_win_icon';
+                const bfIcon = assets.getImage(bfIconKey);
+                if (bfIcon) {
+                    ctx.drawImage(bfIcon, healthBarX - iconSize - 20, iconY, iconSize, iconSize);
+                }
+                
+                // Иконка GF
+                const gfIconKey = player.health < 0.3 ? 'gf_lose_icon' : 'gf_win_icon';
+                const gfIcon = assets.getImage(gfIconKey);
+                if (gfIcon) {
+                    ctx.drawImage(gfIcon, healthBarX + healthBarWidth + 20, iconY, iconSize, iconSize);
+                }
+
+                // Счет
+                ctx.font = 'bold 36px Arial';
+                ctx.fillStyle = '#fff';
+                ctx.textAlign = 'left';
+                ctx.fillText(`Счет: ${player.score.toLocaleString()}`, 50, CONSTANTS.CANVAS_HEIGHT - 30);
+
+                // Комбо
+                if (player.combo > 0) {
+                    ctx.font = 'bold 48px Arial';
+                    ctx.fillStyle = '#feca57';
+                    ctx.textAlign = 'center';
+                    ctx.shadowColor = '#ff6b6b';
+                    ctx.shadowBlur = 10;
+                    ctx.fillText(`${player.combo} КОМБО`, CONSTANTS.CANVAS_WIDTH / 2, CONSTANTS.CANVAS_HEIGHT - 80);
+                    ctx.shadowBlur = 0;
+                }
+
+                // Множитель
+                if (player.multiplier > 1) {
+                    ctx.font = 'bold 32px Arial';
+                    ctx.fillStyle = '#48dbfb';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(`x${player.multiplier}`, CONSTANTS.CANVAS_WIDTH - 50, CONSTANTS.CANVAS_HEIGHT - 30);
+                }
+
+                // Точность
+                ctx.font = '28px Arial';
+                ctx.fillStyle = '#aaa';
+                ctx.textAlign = 'right';
+                ctx.fillText(`Точность: ${player.accuracy.toFixed(1)}%`, CONSTANTS.CANVAS_WIDTH - 50, CONSTANTS.CANVAS_HEIGHT - 70);
+            }
+
+            drawPauseMenu(ctx, assets) {
+                // Полупрозрачный оверлей
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, CONSTANTS.CANVAS_WIDTH, CONSTANTS.CANVAS_HEIGHT);
+
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 64px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText('ПАУЗА', CONSTANTS.CANVAS_WIDTH / 2, 250);
+
+                const options = ['ПРОДОЛЖИТЬ', 'МЕНЮ', 'ВЫХОД'];
+                options.forEach((option, index) => {
+                    const isSelected = index === this.selectedOption;
+                    const y = 350 + index * 80;
+                    
+                    ctx.font = isSelected ? 'bold 42px Arial' : '36px Arial';
+                    ctx.fillStyle = isSelected ? '#ff6b6b' : '#ffffff';
+                    ctx.fillText(option, CONSTANTS.CANVAS_WIDTH / 2, y);
+                });
+            }
+
+            drawGameOver(ctx, assets, victory) {
+                // Полупрозрачный оверлей
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(0, 0, CONSTANTS.CANVAS_WIDTH, CONSTANTS.CANVAS_HEIGHT);
+
+                const title = victory ? 'ПОБЕДА!' : 'ПОРАЖЕНИЕ';
+                const titleColor = victory ? '#48dbfb' : '#ff6b6b';
+                
+                ctx.fillStyle = titleColor;
+                ctx.font = 'bold 72px Arial';
+                ctx.textAlign = 'center';
+                ctx.shadowColor = titleColor;
+                ctx.shadowBlur = 30;
+                ctx.fillText(title, CONSTANTS.CANVAS_WIDTH / 2, 200);
+                ctx.shadowBlur = 0;
+
+                // Статистика
+                const player = this.game.player;
+                ctx.fillStyle = '#fff';
+                ctx.font = '36px Arial';
+                ctx.fillText(`Счет: ${player.score.toLocaleString()}`, CONSTANTS.CANVAS_WIDTH / 2, 300);
+                ctx.fillText(`Макс. комбо: ${player.maxCombo}`, CONSTANTS.CANVAS_WIDTH / 2, 360);
+                ctx.fillText(`Точность: ${player.accuracy.toFixed(1)}%`, CONSTANTS.CANVAS_WIDTH / 2, 420);
+                ctx.fillText(`Ноты попаданий: ${player.notesHit}`, CONSTANTS.CANVAS_WIDTH / 2, 480);
+                ctx.fillText(`Ноты промахов: ${player.notesMissed}`, CONSTANTS.CANVAS_WIDTH / 2, 540);
+
+                // Персонаж
+                const resultImage = victory ? assets.getImage('bf_win_icon') : assets.getImage('bf_lose_icon');
+                if (resultImage) {
+                    const size = 200;
+                    ctx.drawImage(resultImage, 
+                                 (CONSTANTS.CANVAS_WIDTH - size) / 2, 580, size, size);
+                }
+
+                ctx.fillStyle = '#aaa';
+                ctx.font = '28px Arial';
+                ctx.fillText('Нажмите ENTER для продолжения', CONSTANTS.CANVAS_WIDTH / 2, CONSTANTS.CANVAS_HEIGHT - 80);
+            }
+
+            handleInput(key, isPress) {
+                if (!isPress) return;
+
+                if (this.game.state === GameState.MENU) {
+                    if (key === 'ArrowUp' || key === 'w' || key === 'W' || key === 'ц' || key === 'Ц') {
+                        this.menuSelection = (this.menuSelection - 1 + this.menuItems.length) % this.menuItems.length;
+                        this.game.assets.playSound('click', 0.3);
+                    } else if (key === 'ArrowDown' || key === 's' || key === 'S' || key === 'ы' || key === 'Ы') {
+                        this.menuSelection = (this.menuSelection + 1) % this.menuItems.length;
+                        this.game.assets.playSound('click', 0.3);
+                    } else if (key === 'Enter' || key === ' ') {
+                        this.handleMenuSelect();
+                    }
+                } else if (this.game.state === GameState.PAUSED) {
+                    if (key === 'ArrowUp' || key === 'w' || key === 'W' || key === 'ц' || key === 'Ц') {
+                        this.selectedOption = (this.selectedOption - 1 + 3) % 3;
+                        this.game.assets.playSound('click', 0.3);
+                    } else if (key === 'ArrowDown' || key === 's' || key === 'S' || key === 'ы' || key === 'Ы') {
+                        this.selectedOption = (this.selectedOption + 1) % 3;
+                        this.game.assets.playSound('click', 0.3);
+                    } else if (key === 'Enter' || key === ' ') {
+                        this.handlePauseSelect();
+                    } else if (key === 'Escape' || key === 'p' || key === 'P') {
+                        this.game.resumeGame();
+                    }
+                } else if ((this.game.state === GameState.GAME_OVER || this.game.state === GameState.VICTORY) 
+                          && (key === 'Enter' || key === ' ')) {
+                    this.game.resetToMenu();
+                }
+            }
+
+            handleMenuSelect() {
+                this.game.assets.playSound('confirm', 0.5);
+                
+                switch(this.menuSelection) {
+                    case 0: // ИГРАТЬ
+                        this.game.startGame();
+                        break;
+                    case 1: // ОПЦИИ
+                        // Пока просто возвращаемся
+                        break;
+                    case 2: // АВТОРЫ
+                        // Показать информацию об авторах
+                        break;
+                    case 3: // ВЫХОД
+                        // Можно закрыть игру или показать подтверждение
+                        break;
+                }
+            }
+
+            handlePauseSelect() {
+                this.game.assets.playSound('confirm', 0.5);
+                
+                switch(this.selectedOption) {
+                    case 0: // ПРОДОЛЖИТЬ
+                        this.game.resumeGame();
+                        break;
+                    case 1: // МЕНЮ
+                        this.game.resetToMenu();
+                        break;
+                    case 2: // ВЫХОД
+                        location.reload();
+                        break;
+                }
+            }
+        }
+
+        // ============================================
+        // ОСНОВНОЙ КЛАСС ИГРЫ
+        // ============================================
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.assets = new AssetManager();
+                this.state = GameState.LOADING;
+                this.lastTime = 0;
+                this.keysPressed = {};
+                
+                this.player = new Player();
+                this.opponent = new Opponent();
+                this.sequencer = new Sequencer();
+                this.uiManager = new UIManager(this);
+                
+                this.notes = [];
+                this.pressedDirections = { left: false, down: false, up: false, right: false };
+                
+                this.songPosition = 0;
+                this.songPlaying = false;
+                
+                this.setupInputHandlers();
+                this.startLoading();
+            }
+
+            setupInputHandlers() {
+                document.addEventListener('keydown', (e) => {
+                    if (this.keysPressed[e.key]) return;
+                    this.keysPressed[e.key] = true;
+                    this.handleKeyPress(e.key);
+                });
+
+                document.addEventListener('keyup', (e) => {
+                    this.keysPressed[e.key] = false;
+                    this.handleKeyRelease(e.key);
+                });
+            }
+
+            handleKeyPress(key) {
+                if (this.state === GameState.MENU || this.state === GameState.PAUSED || 
+                    this.state === GameState.GAME_OVER || this.state === GameState.VICTORY) {
+                    this.uiManager.handleInput(key, true);
+                    return;
+                }
+
+                if (this.state !== GameState.PLAYING) return;
+
+                // Проверка нажатия клавиш игрока
+                if (CONSTANTS.KEYS.LEFT.includes(key)) {
+                    this.pressedDirections.left = true;
+                    this.player.setDirection('left');
+                    this.checkHit('left');
+                } else if (CONSTANTS.KEYS.DOWN.includes(key)) {
+                    this.pressedDirections.down = true;
+                    this.player.setDirection('down');
+                    this.checkHit('down');
+                } else if (CONSTANTS.KEYS.UP.includes(key)) {
+                    this.pressedDirections.up = true;
+                    this.player.setDirection('up');
+                    this.checkHit('up');
+                } else if (CONSTANTS.KEYS.RIGHT.includes(key)) {
+                    this.pressedDirections.right = true;
+                    this.player.setDirection('right');
+                    this.checkHit('right');
+                } else if (key === 'Escape' || key === 'p' || key === 'P') {
+                    this.pauseGame();
+                }
+            }
+
+            handleKeyRelease(key) {
+                if (CONSTANTS.KEYS.LEFT.includes(key)) {
+                    this.pressedDirections.left = false;
+                } else if (CONSTANTS.KEYS.DOWN.includes(key)) {
+                    this.pressedDirections.down = false;
+                } else if (CONSTANTS.KEYS.UP.includes(key)) {
+                    this.pressedDirections.up = false;
+                } else if (CONSTANTS.KEYS.RIGHT.includes(key)) {
+                    this.pressedDirections.right = false;
+                }
+            }
+
+            checkHit(direction) {
+                const currentTime = this.songPosition;
+                const hitWindow = CONSTANTS.HIT_WINDOW;
+                
+                // Находим ближайшую ноту в этом направлении
+                const hittableNotes = this.notes.filter(note => 
+                    note.direction === direction && 
+                    !note.hit && 
+                    !note.missed &&
+                    note.canBeHit(currentTime, hitWindow)
+                );
+
+                if (hittableNotes.length === 0) return;
+
+                // Берем самую раннюю ноту
+                const targetNote = hittableNotes.reduce((earliest, note) => 
+                    note.time < earliest.time ? note : earliest
+                );
+
+                const result = targetNote.getHitResult(currentTime, hitWindow);
+                
+                if (result) {
+                    targetNote.hit = true;
+                    targetNote.wasHit = true;
+                    const hitInfo = this.player.hitNote(result);
+                    
+                    // Звук попадания (опционально)
+                    // this.assets.playSound('hit', 0.3);
+                    
+                    console.log(`HIT: ${result.toUpperCase()}! +${hitInfo.score} pts`);
+                }
+            }
+
+            async startLoading() {
+                const loadingProgress = document.getElementById('loadingProgress');
+                const loadingText = document.getElementById('loadingText');
+
+                this.assets.onProgress = (loaded, total) => {
+                    const progress = this.assets.getLoadingProgress();
+                    loadingProgress.style.width = `${progress}%`;
+                    loadingText.textContent = `Загрузка: ${Math.round(progress)}% (${loaded}/${total})`;
+                };
+
+                try {
+                    await this.assets.loadAll();
+                    
+                    // Небольшая задержка перед показом меню
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    document.getElementById('loadingScreen').classList.add('hidden');
+                    this.state = GameState.MENU;
+                    this.assets.playSound('menu_music', 0.5);
+                    
+                    // Зацикливаем музыку меню
+                    const menuMusic = this.assets.getSound('menu_music');
+                    if (menuMusic) {
+                        menuMusic.loop = true;
+                    }
+                    
+                    this.lastTime = performance.now();
+                    requestAnimationFrame((time) => this.gameLoop(time));
+                    
+                } catch (error) {
+                    console.error('Error loading assets:', error);
+                    loadingText.textContent = 'Ошибка загрузки!';
+                }
+            }
+
+            startGame() {
+                // Останавливаем музыку меню
+                const menuMusic = this.assets.getSound('menu_music');
+                if (menuMusic) {
+                    menuMusic.pause();
+                    menuMusic.currentTime = 0;
+                }
+
+                // Сброс состояния игрока
+                this.player = new Player();
+                this.opponent = new Opponent();
+                
+                // Генерируем чарт
+                this.sequencer.generateTutorialChart(100);
+                
+                // Создаем ноты
+                this.notes = this.sequencer.chart.map(noteData => 
+                    new Note(noteData.direction, noteData.time, false)
+                );
+
+                // Запускаем песню
+                const tutorialMusic = this.assets.getSound('tutorial_inst');
+                if (tutorialMusic) {
+                    tutorialMusic.volume = 0.7;
+                    tutorialMusic.loop = false;
+                    tutorialMusic.play().then(() => {
+                        this.songPlaying = true;
+                        this.songPosition = 0;
+                    }).catch(e => {
+                        console.log('Music play failed:', e);
+                        this.songPlaying = true;
+                        this.songPosition = 0;
+                    });
+                } else {
+                    this.songPlaying = true;
+                    this.songPosition = 0;
+                }
+
+                this.state = GameState.PLAYING;
+            }
+
+            pauseGame() {
+                if (this.state === GameState.PLAYING) {
+                    this.state = GameState.PAUSED;
+                    const tutorialMusic = this.assets.getSound('tutorial_inst');
+                    if (tutorialMusic) {
+                        tutorialMusic.pause();
+                    }
+                }
+            }
+
+            resumeGame() {
+                if (this.state === GameState.PAUSED) {
+                    this.state = GameState.PLAYING;
+                    const tutorialMusic = this.assets.getSound('tutorial_inst');
+                    if (tutorialMusic) {
+                        tutorialMusic.play().catch(e => console.log('Resume failed:', e));
+                    }
+                    this.lastTime = performance.now();
+                }
+            }
+
+            resetToMenu() {
+                // Останавливаем музыку
+                const tutorialMusic = this.assets.getSound('tutorial_inst');
+                if (tutorialMusic) {
+                    tutorialMusic.pause();
+                    tutorialMusic.currentTime = 0;
+                }
+
+                const menuMusic = this.assets.getSound('menu_music');
+                if (menuMusic) {
+                    menuMusic.currentTime = 0;
+                    menuMusic.play().catch(e => console.log('Menu music failed:', e));
+                }
+
+                this.state = GameState.MENU;
+                this.uiManager.menuSelection = 0;
+            }
+
+            update(deltaTime) {
+                this.uiManager.update(deltaTime);
+
+                if (this.state === GameState.PLAYING) {
+                    // Обновляем позицию песни
+                    if (this.songPlaying) {
+                        const tutorialMusic = this.assets.getSound('tutorial_inst');
+                        if (tutorialMusic) {
+                            this.songPosition = tutorialMusic.currentTime * 1000;
+                            
+                            // Проверяем конец песни
+                            if (tutorialMusic.ended || 
+                                this.songPosition > this.sequencer.getSongLength()) {
+                                this.endGame(true);
+                            }
+                        } else {
+                            this.songPosition += deltaTime * 1000;
+                        }
+                    }
+
+                    // Обновляем игрока
+                    this.player.update(deltaTime);
+
+                    // Обновляем противника
+                    this.opponent.update(deltaTime, this.songPosition);
+
+                    // Обновляем ноты
+                    this.notes.forEach(note => {
+                        note.update(deltaTime, CONSTANTS.NOTE_SPEED);
+                        
+                        // Проверка на промах
+                        if (note.shouldMiss(this.songPosition, CONSTANTS.HIT_WINDOW)) {
+                            note.missed = true;
+                            this.player.missNote();
+                        }
+                    });
+
+                    // Проверка на проигрыш
+                    if (this.player.health <= 0) {
+                        this.endGame(false);
+                    }
+
+                    // Удаляем старые ноты
+                    this.notes = this.notes.filter(note => 
+                        !((note.hit || note.missed) && note.alpha <= 0)
+                    );
+                }
+            }
+
+            draw() {
+                // Очистка экрана
+                this.ctx.fillStyle = '#000';
+                this.ctx.fillRect(0, 0, CONSTANTS.CANVAS_WIDTH, CONSTANTS.CANVAS_HEIGHT);
+
+                if (this.state === GameState.MENU) {
+                    this.uiManager.draw(this.ctx, this.assets);
+                    return;
+                }
+
+                // Рисуем фон сцены
+                const stageImage = this.assets.getImage('stage');
+                if (stageImage) {
+                    this.ctx.drawImage(stageImage, 0, 0, CONSTANTS.CANVAS_WIDTH, CONSTANTS.CANVAS_HEIGHT);
+                } else {
+                    // Резервный фон
+                    const gradient = this.ctx.createLinearGradient(0, 0, 0, CONSTANTS.CANVAS_HEIGHT);
+                    gradient.addColorStop(0, '#2d1b4e');
+                    gradient.addColorStop(1, '#1a1a2e');
+                    this.ctx.fillStyle = gradient;
+                    this.ctx.fillRect(0, 0, CONSTANTS.CANVAS_WIDTH, CONSTANTS.CANVAS_HEIGHT);
+                }
+
+                // Рисуем стрелки цели (статичные)
+                this.drawTargetArrows();
+
+                // Рисуем ноты
+                this.notes.forEach(note => {
+                    if (!note.hit && !note.missed) {
+                        const x = this.getArrowX(note.direction);
+                        note.draw(this.ctx, x, this.assets);
+                    }
+                });
+
+                // Рисуем противника (ГФ)
+                this.opponent.draw(this.ctx, CONSTANTS.CANVAS_WIDTH * 0.75, 520, this.assets);
+
+                // Рисуем игрока (БФ)
+                this.player.draw(this.ctx, CONSTANTS.CANVAS_WIDTH * 0.25, 520, this.assets);
+
+                // Рисуем нажатые стрелки
+                this.drawPressedArrows();
+
+                // Рисуем UI
+                this.uiManager.draw(this.ctx, this.assets);
+            }
+
+            drawTargetArrows() {
+                const directions = CONSTANTS.DIRECTIONS;
+                const targetY = CONSTANTS.NOTE_HIT_Y;
+
+                directions.forEach((dir, index) => {
+                    const x = this.getArrowX(dir);
+                    const arrowKey = `arrow_${dir}`;
+                    const arrowImg = this.assets.getImage(arrowKey);
+
+                    this.ctx.save();
+                    this.ctx.globalAlpha = 0.5;
+
+                    if (arrowImg) {
+                        const size = 90;
+                        this.ctx.drawImage(arrowImg, x - size/2, targetY - size/2, size, size);
+                    } else {
+                        // Резервная отрисовка
+                        const tempNote = new Note(dir, 0);
+                        tempNote.drawFallback(this.ctx, x, targetY);
+                    }
+
+                    this.ctx.restore();
+                });
+            }
+
+            drawPressedArrows() {
+                const targetY = CONSTANTS.NOTE_HIT_Y;
+
+                CONSTANTS.DIRECTIONS.forEach(dir => {
+                    if (this.pressedDirections[dir]) {
+                        const x = this.getArrowX(dir);
+                        const arrowKey = `arrow_${dir}`;
+                        const arrowImg = this.assets.getImage(arrowKey);
+
+                        this.ctx.save();
+                        this.ctx.globalAlpha = 0.8;
+                        this.ctx.scale(1.1, 1.1);
+
+                        if (arrowImg) {
+                            const size = 90;
+                            this.ctx.drawImage(arrowImg, 
+                                (x - size/2) / 1.1, 
+                                (targetY - size/2) / 1.1, 
+                                size, size);
+                        }
+
+                        this.ctx.restore();
+                    }
+                });
+            }
+
+            getArrowX(direction) {
+                const baseX = CONSTANTS.CANVAS_WIDTH / 2;
+                const spacing = 110;
+                const index = CONSTANTS.DIRECTION_INDEX[direction];
+                return baseX - 1.5 * spacing + index * spacing;
+            }
+
+            endGame(victory) {
+                this.songPlaying = false;
+                
+                const tutorialMusic = this.assets.getSound('tutorial_inst');
+                if (tutorialMusic) {
+                    tutorialMusic.pause();
+                }
+
+                if (victory) {
+                    this.state = GameState.VICTORY;
+                    this.assets.playSound('confirm', 0.5);
+                } else {
+                    this.state = GameState.GAME_OVER;
+                    this.assets.playSound('game_over', 0.7);
+                }
+            }
+
+            gameLoop(currentTime) {
+                const deltaTime = (currentTime - this.lastTime) / 1000;
+                this.lastTime = currentTime;
+
+                // Ограничиваем deltaTime чтобы избежать больших скачков
+                const safeDeltaTime = Math.min(deltaTime, 0.1);
+
+                this.update(safeDeltaTime);
+                this.draw();
+
+                requestAnimationFrame((time) => this.gameLoop(time));
+            }
+        }
+
+        // ============================================
+        // ЗАПУСК ИГРЫ
+        // ============================================
+        window.addEventListener('load', () => {
+            console.log('🎵 Friday Night Funkin\' - ФНФ x Аля 🎵');
+            console.log('Запуск игры...');
+            
+            const game = new Game();
+            window.game = game; // Для отладки
+        });
+
+    </script>
+</body>
+</html>
